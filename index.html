@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>متابعة قراءة القرآن بالأحزاب</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="title">متابعة قراءة القرآن بالأحزاب</div>
+    <div class="stats" id="stats"></div>
+  </header>
+
+  <main class="wrap">
+    <section class="card">
+      <div class="cardTitle">الأحزاب (60)</div>
+      <div class="grid" id="grid"></div>
+    </section>
+
+    <section class="card">
+      <div class="cardTitle">الحزب المختار</div>
+      <div class="selected" id="selected">
+        اختر حزباً من اللائحة
+      </div>
+
+      <div class="actions">
+        <button id="btnDone" disabled>تمّ قراءة هذا الحزب</button>
+        <button id="btnUndo" disabled>تراجع (إلغاء التحديد)</button>
+        <button id="btnReset" class="danger">تصفير الكل</button>
+      </div>
+
+      <div class="hint">
+        ملاحظة: هذا التطبيق للتتبع فقط. إذا بغيت القراءة داخل التطبيق، نزيدو محتوى القراءة لاحقاً.
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
