@@ -1,118 +1,201 @@
 const TOTAL = 60;
-const KEY = "hizb_progress_v1";
+const PROGRESS_KEY = "hizb_done_v2";
 
-let state = {
-  done: Array(TOTAL).fill(false),
-  selected: null
-};
+// QuranFoundation API (verses by hizb)  [oai_citation:1‡api-docs.quran.foundation](https://api-docs.quran.foundation/docs/content_apis_versioned/verses-by-hizb-number/)
+const API_BASE = "https://api.quran.com/api/v4";
 
-function load() {
+let selected = null;
+let done = Array(TOTAL).fill(false);
+
+const el = (id) => document.getElementById(id);
+
+function setStatus(msg) {
+  const s = el("status");
+  if (s) s.textContent = msg;
+}
+
+function loadProgress() {
   try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) {
-      const s = JSON.parse(raw);
-      if (Array.isArray(s.done) && s.done.length === TOTAL) state.done = s.done;
-    }
+    const raw = localStorage.getItem(PROGRESS_KEY);
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    if (Array.isArray(s.done) && s.done.length === TOTAL) done = s.done;
   } catch {}
 }
 
-function save() {
-  localStorage.setItem(KEY, JSON.stringify({ done: state.done }));
-}
-
-function countDone() {
-  return state.done.filter(Boolean).length;
+function saveProgress() {
+  localStorage.setItem(PROGRESS_KEY, JSON.stringify({ done }));
 }
 
 function renderStats() {
-  const done = countDone();
-  const left = TOTAL - done;
-  const pct = Math.round((done / TOTAL) * 100);
-  document.getElementById("stats").textContent =
-    `مقروء: ${done} حزب • متبقي: ${left} • التقدم: ${pct}%`;
+  const d = done.filter(Boolean).length;
+  const left = TOTAL - d;
+  const pct = Math.round((d / TOTAL) * 100);
+  const stats = el("stats");
+  if (stats) stats.textContent = `مقروء: ${d} حزب • متبقي: ${left} • ${pct}%`;
 }
 
 function renderGrid() {
-  const grid = document.getElementById("grid");
+  const grid = el("hizbGrid") || el("grid"); // support both ids
+  if (!grid) return;
+
   grid.innerHTML = "";
-
   for (let i = 1; i <= TOTAL; i++) {
-    const btn = document.createElement("button");
-    btn.className = "hizbBtn";
-    if (state.done[i - 1]) btn.classList.add("done");
-    if (state.selected === i) btn.classList.add("active");
-
-    btn.innerHTML = `حزب ${i} ${state.done[i-1] ? `<span class="badge">✓</span>` : ""}`;
-    btn.onclick = () => selectHizb(i);
-    grid.appendChild(btn);
+    const b = document.createElement("button");
+    b.className = "hizbBtn";
+    if (done[i - 1]) b.classList.add("done");
+    if (selected === i) b.classList.add("active");
+    b.textContent = `حزب ${i}`;
+    b.onclick = () => openHizb(i);
+    grid.appendChild(b);
   }
 }
 
-function renderSelected() {
-  const box = document.getElementById("selected");
-  const btnDone = document.getElementById("btnDone");
-  const btnUndo = document.getElementById("btnUndo");
+function setButtons() {
+  const btnDone = el("btnDone") || el("doneBtn");
+  const btnUndo = el("btnUndo") || el("undoBtn");
+  if (!btnDone || !btnUndo) return;
 
-  if (!state.selected) {
-    box.innerHTML = "اختر حزباً من اللائحة";
+  if (!selected) {
     btnDone.disabled = true;
     btnUndo.disabled = true;
     return;
   }
-
-  const i = state.selected;
-  const isDone = state.done[i - 1];
-
-  box.innerHTML = isDone
-    ? `<div><strong>حزب ${i}</strong><div class="badge">معلّم كمقروء ✓</div></div>`
-    : `<div><strong>حزب ${i}</strong><div class="badge">غير معلّم بعد</div></div>`;
-
-  btnDone.disabled = isDone;   // ماشي ضروري تقدر تخليه يخدم دائماً، لكن هكا أوضح
-  btnUndo.disabled = !isDone;
+  btnDone.disabled = done[selected - 1];
+  btnUndo.disabled = !done[selected - 1];
 }
 
-function selectHizb(i) {
-  state.selected = i;
-  renderAll();
+function showReader(html) {
+  const r = el("reader") || el("readingBox");
+  if (r) r.innerHTML = html;
+}
+
+function setTitle(t) {
+  const v = el("viewTitle") || el("hTitle");
+  if (v) v.textContent = t;
+}
+
+async function fetchJson(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function fetchAllVersesByHizb(hizbNumber) {
+  // API paginated, max per_page 50  [oai_citation:2‡api-docs.quran.foundation](https://api-docs.quran.foundation/docs/content_apis_versioned/verses-by-hizb-number/)
+  const perPage = 50;
+  let page = 1;
+  let all = [];
+  let totalPages = 1;
+
+  while (page <= totalPages) {
+    const url =
+      `${API_BASE}/verses/by_hizb/${hizbNumber}` +
+      `?fields=text_uthmani,verse_key,verse_number,chapter_id` +
+      `&per_page=${perPage}&page=${page}`;
+
+    const data = await fetchJson(url);
+
+    const verses = data.verses || [];
+    all = all.concat(verses);
+
+    const pagination = data.pagination || {};
+    totalPages = pagination.total_pages || pagination.totalPages || totalPages;
+    page++;
+  }
+
+  return all;
+}
+
+function renderVerses(verses) {
+  if (!verses.length) {
+    showReader(`<div class="empty">ما لقيناش آيات فهاد الحزب.</div>`);
+    return;
+  }
+
+  // Group by chapter_id to show سورة header
+  const byChapter = new Map();
+  for (const v of verses) {
+    const ch = v.chapter_id ?? v.chapterId ?? v.chapter;
+    if (!byChapter.has(ch)) byChapter.set(ch, []);
+    byChapter.get(ch).push(v);
+  }
+
+  // Keep chapter order as they appear
+  const orderedChapters = [];
+  for (const v of verses) {
+    const ch = v.chapter_id ?? v.chapterId ?? v.chapter;
+    if (!orderedChapters.includes(ch)) orderedChapters.push(ch);
+  }
+
+  let html = "";
+  for (const ch of orderedChapters) {
+    html += `<div class="suraHeader">سورة رقم ${ch}</div>`;
+    const items = byChapter.get(ch) || [];
+    for (const v of items) {
+      const txt = v.text_uthmani || "";
+      const ay = v.verse_number || v.verseNumber || "";
+      html += `<div class="ayahLine"><span class="ayahText">${txt}</span> <span class="ayahNum">﴿${ay}﴾</span></div>`;
+    }
+  }
+
+  showReader(html);
+}
+
+async function openHizb(hizbNumber) {
+  selected = hizbNumber;
+  renderGrid();
+  renderStats();
+  setButtons();
+
+  setTitle(`حزب ${hizbNumber}`);
+  showReader(`<div class="loading">تحميل نص الحزب...</div>`);
+  setStatus("جلب الآيات من الإنترنت...");
+
+  try {
+    const verses = await fetchAllVersesByHizb(hizbNumber);
+    renderVerses(verses);
+    setStatus(`جاهز. قرأ حزب ${hizbNumber} ثم اضغط "تمّ".`);
+  } catch (e) {
+    showReader(`<div class="error">وقع مشكل فالجلب. جرّب ريفريش أو شبكة أخرى.<br><small>${String(e.message || e)}</small></div>`);
+    setStatus("خطأ في الجلب");
+  }
 }
 
 function markDone() {
-  if (!state.selected) return;
-  state.done[state.selected - 1] = true;
-  save();
-  renderAll();
+  const btnDone = el("btnDone") || el("doneBtn");
+  if (!selected) return;
+  done[selected - 1] = true;
+  saveProgress();
+  renderGrid();
+  renderStats();
+  setButtons();
+  if (btnDone) btnDone.disabled = true;
+  setStatus(`تمّ تعليم حزب ${selected} كمقروء.`);
 }
 
 function undoDone() {
-  if (!state.selected) return;
-  state.done[state.selected - 1] = false;
-  save();
-  renderAll();
-}
-
-function resetAll() {
-  const ok = confirm("واش متأكد بغيتي تصفّر جميع الأحزاب؟");
-  if (!ok) return;
-  state.done = Array(TOTAL).fill(false);
-  state.selected = null;
-  save();
-  renderAll();
-}
-
-function renderAll() {
-  renderStats();
+  if (!selected) return;
+  done[selected - 1] = false;
+  saveProgress();
   renderGrid();
-  renderSelected();
+  renderStats();
+  setButtons();
+  setStatus(`تمّ إلغاء تعليم حزب ${selected}.`);
 }
 
-function init() {
-  load();
-
-  document.getElementById("btnDone").onclick = markDone;
-  document.getElementById("btnUndo").onclick = undoDone;
-  document.getElementById("btnReset").onclick = resetAll;
-
-  renderAll();
+function bindButtons() {
+  const btnDone = el("btnDone") || el("doneBtn");
+  const btnUndo = el("btnUndo") || el("undoBtn");
+  if (btnDone) btnDone.onclick = markDone;
+  if (btnUndo) btnUndo.onclick = undoDone;
 }
 
-window.addEventListener("load", init);
+window.addEventListener("load", () => {
+  loadProgress();
+  bindButtons();
+  renderGrid();
+  renderStats();
+  setButtons();
+  setStatus("اختر حزباً للقراءة.");
+});
