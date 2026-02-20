@@ -1,8 +1,10 @@
-const TOTAL = 60;
-const PROGRESS_KEY = "hizb_done_v2";
+// Quran Hizb Reader (60) + Mark Done
+// Data source: Qurani.ai Hizb endpoint (works in browser)
+// Example: https://api.qurani.ai/gw/qh/v1/hizb/1/quran-uthmani?limit=2000&offset=0
 
-// QuranFoundation API (verses by hizb)  [oai_citation:1‡api-docs.quran.foundation](https://api-docs.quran.foundation/docs/content_apis_versioned/verses-by-hizb-number/)
-const API_BASE = "https://api.alquran.cloud/v1";
+const TOTAL = 60;
+const PROGRESS_KEY = "hizb_done_v3";
+const API_BASE = "https://api.qurani.ai/gw/qh/v1";
 
 let selected = null;
 let done = Array(TOTAL).fill(false);
@@ -36,7 +38,7 @@ function renderStats() {
 }
 
 function renderGrid() {
-  const grid = el("hizbGrid") || el("grid"); // support both ids
+  const grid = el("hizbGrid") || el("grid"); // supports both layouts
   if (!grid) return;
 
   grid.innerHTML = "";
@@ -65,14 +67,14 @@ function setButtons() {
   btnUndo.disabled = !done[selected - 1];
 }
 
-function showReader(html) {
-  const r = el("reader") || el("readingBox");
-  if (r) r.innerHTML = html;
-}
-
 function setTitle(t) {
   const v = el("viewTitle") || el("hTitle");
   if (v) v.textContent = t;
+}
+
+function showReader(html) {
+  const r = el("reader") || el("readingBox");
+  if (r) r.innerHTML = html;
 }
 
 async function fetchJson(url) {
@@ -81,59 +83,41 @@ async function fetchJson(url) {
   return res.json();
 }
 
-async function fetchAllVersesByHizb(hizbNumber) {
-  // API paginated, max per_page 50  [oai_citation:2‡api-docs.quran.foundation](https://api-docs.quran.foundation/docs/content_apis_versioned/verses-by-hizb-number/)
-  const perPage = 50;
-  let page = 1;
-  let all = [];
-  let totalPages = 1;
+async function fetchHizbAyahs(hizbNumber) {
+  const url = `${API_BASE}/hizb/${hizbNumber}/quran-uthmani?limit=2000&offset=0`;
+  const json = await fetchJson(url);
 
-  while (page <= totalPages) {
-    const url = `${API_BASE}/hizb/${hizbNumber}/quran-uthmani`;
-
-    const data = await fetchJson(url);
-
-    const verses = data.verses || [];
-    all = all.concat(verses);
-
-    const pagination = data.pagination || {};
-    totalPages = pagination.total_pages || pagination.totalPages || totalPages;
-    page++;
-  }
-
-  return all;
+  // Shape confirmed by you:
+  // { code:200, status:"OK", data:{ number:1, ayahs:[...] } }
+  const ayahs = json?.data?.ayahs || [];
+  return ayahs;
 }
 
-function renderVerses(verses) {
-  if (!verses.length) {
+function renderAyahs(ayahs) {
+  if (!ayahs.length) {
     showReader(`<div class="empty">ما لقيناش آيات فهاد الحزب.</div>`);
     return;
   }
 
-  // Group by chapter_id to show سورة header
-  const byChapter = new Map();
-  for (const v of verses) {
-    const ch = v.chapter_id ?? v.chapterId ?? v.chapter;
-    if (!byChapter.has(ch)) byChapter.set(ch, []);
-    byChapter.get(ch).push(v);
-  }
-
-  // Keep chapter order as they appear
-  const orderedChapters = [];
-  for (const v of verses) {
-    const ch = v.chapter_id ?? v.chapterId ?? v.chapter;
-    if (!orderedChapters.includes(ch)) orderedChapters.push(ch);
-  }
-
   let html = "";
-  for (const ch of orderedChapters) {
-    html += `<div class="suraHeader">سورة رقم ${ch}</div>`;
-    const items = byChapter.get(ch) || [];
-    for (const v of items) {
-      const txt = v.text_uthmani || "";
-      const ay = v.verse_number || v.verseNumber || "";
-      html += `<div class="ayahLine"><span class="ayahText">${txt}</span> <span class="ayahNum">﴿${ay}﴾</span></div>`;
+  let currentSurah = null;
+
+  for (const a of ayahs) {
+    const sNum = a?.surah?.number;
+    const sName = a?.surah?.name || (sNum ? `سورة ${sNum}` : "سورة");
+
+    if (currentSurah !== sNum) {
+      currentSurah = sNum;
+      html += `<div class="suraHeader">${sName}${sNum ? ` (${sNum})` : ""}</div>`;
     }
+
+    const text = a.text || "";
+    const numInSurah = a.numberInSurah ?? "";
+
+    html += `<div class="ayahLine">
+      <span class="ayahText">${text}</span>
+      <span class="ayahNum">﴿${numInSurah}﴾</span>
+    </div>`;
   }
 
   showReader(html);
@@ -150,24 +134,26 @@ async function openHizb(hizbNumber) {
   setStatus("جلب الآيات من الإنترنت...");
 
   try {
-    const verses = await fetchAllVersesByHizb(hizbNumber);
-    renderVerses(verses);
+    const ayahs = await fetchHizbAyahs(hizbNumber);
+    renderAyahs(ayahs);
     setStatus(`جاهز. قرأ حزب ${hizbNumber} ثم اضغط "تمّ".`);
   } catch (e) {
-    showReader(`<div class="error">وقع مشكل فالجلب. جرّب ريفريش أو شبكة أخرى.<br><small>${String(e.message || e)}</small></div>`);
+    showReader(
+      `<div class="error">وقع مشكل فالجلب. جرّب ريفريش أو شبكة أخرى.<br><small>${String(
+        e.message || e
+      )}</small></div>`
+    );
     setStatus("خطأ في الجلب");
   }
 }
 
 function markDone() {
-  const btnDone = el("btnDone") || el("doneBtn");
   if (!selected) return;
   done[selected - 1] = true;
   saveProgress();
   renderGrid();
   renderStats();
   setButtons();
-  if (btnDone) btnDone.disabled = true;
   setStatus(`تمّ تعليم حزب ${selected} كمقروء.`);
 }
 
@@ -184,6 +170,7 @@ function undoDone() {
 function bindButtons() {
   const btnDone = el("btnDone") || el("doneBtn");
   const btnUndo = el("btnUndo") || el("undoBtn");
+
   if (btnDone) btnDone.onclick = markDone;
   if (btnUndo) btnUndo.onclick = undoDone;
 }
