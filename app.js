@@ -2,7 +2,7 @@ const TOTAL = 60;
 const PROGRESS_KEY = "hizb_done_v2";
 
 // QuranFoundation API (verses by hizb)  [oai_citation:1‡api-docs.quran.foundation](https://api-docs.quran.foundation/docs/content_apis_versioned/verses-by-hizb-number/)
-const API_BASE = "https://api.quran.com/api/v4";
+const API_BASE = "https://api.alquran.cloud/v1";
 
 let selected = null;
 let done = Array(TOTAL).fill(false);
@@ -89,10 +89,7 @@ async function fetchAllVersesByHizb(hizbNumber) {
   let totalPages = 1;
 
   while (page <= totalPages) {
-    const url =
-      `${API_BASE}/verses/by_hizb/${hizbNumber}` +
-      `?fields=text_uthmani,verse_key,verse_number,chapter_id` +
-      `&per_page=${perPage}&page=${page}`;
+    const url = `${API_BASE}/hizb/${hizbNumber}/quran-uthmani`;
 
     const data = await fetchJson(url);
 
